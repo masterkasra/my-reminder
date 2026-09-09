@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>مدیریت هوشمند یادآورها</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet" />
+  <style>
+    body { font-family: 'Vazirmatn', sans-serif; }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen p-4 sm:p-8 flex flex-col items-center">
+
+  <div class="w-full max-w-2xl">
+    <!-- Header -->
+    <header class="flex justify-between items-center mb-8 pb-4 border-b border-slate-700">
+      <div>
+        <h1 class="text-2xl font-bold text-emerald-400">یادآور هوشمند</h1>
+        <p class="text-xs text-slate-400 mt-1">مدیریت وظایف و اعلان‌های محلی</p>
+      </div>
+      <button id="enable-notify-btn" onclick="requestNotificationPermission()" class="text-xs bg-slate-800 hover:bg-slate-700 border border-slate-600 px-3 py-2 rounded-lg transition-all">
+        🔔 فعال‌سازی نوتیفیکیشن
+      </button>
+    </header>
+
+    <!-- Reminder Form -->
+    <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-6 shadow-xl mb-8 backdrop-blur-sm">
+      <form id="reminder-form" onsubmit="addReminder(event)" class="space-y-4">
+        <div>
+          <label class="block text-sm text-slate-300 mb-1">عنوان یادآور</label>
+          <input id="title" type="text" required placeholder="مثال: جلسه کاری با تیم"
+                 class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500 text-slate-100" />
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm text-slate-300 mb-1">زمان سررسید</label>
+            <input id="datetime" type="datetime-local" required
+                   class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500 text-slate-100" />
+          </div>
+          <div>
+            <label class="block text-sm text-slate-300 mb-1">اولویت</label>
+            <select id="priority" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500 text-slate-100">
+              <option value="low">کم (سبز)</option>
+              <option value="medium" selected>متوسط (زرد)</option>
+              <option value="high">فوری (قرمز)</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-sm text-slate-300 mb-1">توضیحات تکمیلی (اختیاری)</label>
+          <textarea id="desc" rows="2" placeholder="جزییات بیشتر در صورت نیاز..."
+                    class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500 text-slate-100"></textarea>
+        </div>
+
+        <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-medium py-2.5 rounded-lg transition-colors shadow-lg shadow-emerald-900/30">
+          ثبت یادآور جدید
+        </button>
+      </form>
+    </div>
+
+    <!-- Active List -->
+    <div class="space-y-4">
+      <div class="flex justify-between items-center">
+        <h2 class="text-lg font-semibold text-slate-200">لیست یادآورها</h2>
+        <span id="counter" class="text-xs text-slate-400 bg-slate-800 px-2.5 py-1 rounded-full border border-slate-700">0 یادآور</span>
+      </div>
+      <div id="reminders-list" class="space-y-3">
+        <!-- داینامیک رندر می‌شود -->
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let reminders = JSON.parse(localStorage.getItem('reminders_data')) || [];
+
+    // تولید ملودی با Web Audio API بدون نیاز به فایل خارجی
+    function playBeep() {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
+        osc.frequency.setValueAtTime(880, ctx.currentTime + 0.15); // A5
+
+        gain.gain.setValueAtTime(0.3, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc.start();
+        osc.stop(ctx.currentTime + 0.6);
+      } catch (e) {
+        console.error("خطای صوتی:", e);
+      }
+    }
+
+    function requestNotificationPermission() {
+      if (!("Notification" in window)) {
+        alert("مرورگر شما از Notification پشتیبانی نمی‌کند.");
+        return;
+      }
+      Notification.requestPermission().then(permission => {
+        updateNotifyButtonState();
+        if (permission === "granted") {
+          new Notification("یادآور فعال شد", { body: "اعلان‌ها با موفقیت برای این دستگاه تنظیم شدند." });
+        }
+      });
+    }
+
+    function updateNotifyButtonState() {
+      const btn = document.getElementById('enable-notify-btn');
+      if (!("Notification" in window)) return;
+      if (Notification.permission === 'granted') {
+        btn.textContent = '✅ نوتیفیکیشن فعال است';
+        btn.classList.add('text-emerald-400', 'border-emerald-500/50');
+      }
+    }
+
+    function addReminder(e) {
+      e.preventDefault();
+      const title = document.getElementById('title').value.trim();
+      const datetime = document.getElementById('datetime').value;
+      const priority = document.getElementById('priority').value;
+      const desc = document.getElementById('desc').value.trim();
+
+      const newReminder = {
+        id: Date.now(),
+        title,
+        datetime,
+        priority,
+        desc,
+        triggered: false,
+        completed: false
+      };
+
+      reminders.push(newReminder);
+      saveAndRender();
+      e.target.reset();
+    }
+
+    function deleteReminder(id) {
+      reminders = reminders.filter(r => r.id !== id);
+      saveAndRender();
+    }
+
+    function toggleComplete(id) {
+      const item = reminders.find(r => r.id === id);
+      if (item) {
+        item.completed = !item.completed;
+        saveAndRender();
+      }
+    }
+
+    function saveAndRender() {
+      reminders.sort((a, b) => new Date(a.datetime) - new Date(b.datetime));
+      localStorage.setItem('reminders_data', JSON.stringify(reminders));
+      render();
+    }
+
+    function render() {
+      const container = document.getElementById('reminders-list');
+      const counter = document.getElementById('counter');
+      container.innerHTML = '';
+      counter.textContent = `${reminders.length} یادآور`;
+
+      if (reminders.length === 0) {
+        container.innerHTML = `
+          <div class="text-center py-12 text-slate-500 border border-dashed border-slate-800 rounded-xl">
+            هیچ یادآوری ثبت نشده است.
+          </div>
+        `;
+        return;
+      }
+
+      reminders.forEach(r => {
+        const itemDate = new Date(r.datetime);
+        const formattedDate = itemDate.toLocaleString('fa-IR', {
+          dateStyle: 'medium',
+          timeStyle: 'short'
+        });
+
+        const priorityColors = {
+          high: 'border-rose-500/60 bg-rose-950/10 text-rose-400',
+          medium: 'border-amber-500/60 bg-amber-950/10 text-amber-400',
+          low: 'border-emerald-500/60 bg-emerald-950/10 text-emerald-400'
+        };
+
+        const card = document.createElement('div');
+        card.className = `border rounded-xl p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 transition-all ${
+          r.completed ? 'bg-slate-900/50 border-slate-800 opacity-60' : 'bg-slate-800/60 border-slate-700'
+        }`;
+
+        card.innerHTML = `
+          <div class="space-y-1">
+            <div class="flex items-center gap-2">
+              <span class="text-xs px-2 py-0.5 rounded border ${priorityColors[r.priority]} font-medium">
+                ${r.priority === 'high' ? 'فوری' : r.priority === 'medium' ? 'متوسط' : 'عادی'}
+              </span>
+              <h3 class="font-medium text-slate-100 ${r.completed ? 'line-through text-slate-400' : ''}">${r.title}</h3>
+            </div>
+            ${r.desc ? `<p class="text-xs text-slate-400">${r.desc}</p>` : ''}
+            <div class="text-xs text-slate-400 flex items-center gap-1 mt-1">
+              <span>⏰ سررسید:</span>
+              <span dir="ltr" class="font-mono">${formattedDate}</span>
+            </div>
+          </div>
+          <div class="flex items-center gap-2 self-end sm:self-center">
+            <button onclick="toggleComplete(${r.id})" class="px-2.5 py-1 text-xs rounded border border-slate-600 hover:bg-slate-700 text-slate-300">
+              ${r.completed ? 'بازگردانی' : 'انجام شد'}
+            </button>
+            <button onclick="deleteReminder(${r.id})" class="px-2.5 py-1 text-xs rounded border border-rose-800/80 hover:bg-rose-900/40 text-rose-400">
+              حذف
+            </button>
+          </div>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    // بررسی دوره‌ای زمان سررسید (هر ۳ ثانیه)
+    setInterval(() => {
+      const now = new Date().getTime();
+      reminders.forEach(r => {
+        const target = new Date(r.datetime).getTime();
+        if (!r.triggered && !r.completed && target <= now) {
+          r.triggered = true;
+          playBeep();
+          if (Notification.permission === 'granted') {
+            new Notification(`⏰ یادآور: ${r.title}`, {
+              body: r.desc || "زمان انجام این کار فرا رسیده است.",
+              requireInteraction: true
+            });
+          }
+          saveAndRender();
+        }
+      });
+    }, 3000);
+
+    // راه‌اندازی اولیه
+    updateNotifyButtonState();
+    render();
+  </script>
+</body>
+</html>
